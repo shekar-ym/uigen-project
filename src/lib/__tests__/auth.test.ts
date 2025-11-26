@@ -36,7 +36,7 @@ vi.mock("jose", () => {
 });
 
 // Import after mocking
-import { createSession } from "../auth";
+import { createSession, getSession } from "../auth";
 
 describe("createSession", () => {
   beforeEach(() => {
@@ -153,5 +153,160 @@ describe("createSession", () => {
         email: specialEmail,
       })
     );
+  });
+});
+
+describe("getSession", () => {
+  let mockJwtVerify: any;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+
+    // Get the mocked jwtVerify function for test manipulation
+    const joseModule = await import("jose");
+    mockJwtVerify = vi.mocked(joseModule.jwtVerify);
+  });
+
+  test("returns null when no token exists in cookies", async () => {
+    // Mock cookies to return no auth token
+    mockCookieStore.get.mockReturnValue(undefined);
+
+    const result = await getSession();
+
+    expect(result).toBeNull();
+    expect(mockCookieStore.get).toHaveBeenCalledWith("auth-token");
+    expect(mockJwtVerify).not.toHaveBeenCalled();
+  });
+
+  test("returns null when token value is undefined", async () => {
+    // Mock cookies to return object without value
+    mockCookieStore.get.mockReturnValue({});
+
+    const result = await getSession();
+
+    expect(result).toBeNull();
+    expect(mockJwtVerify).not.toHaveBeenCalled();
+  });
+
+  test("returns session payload when token is valid", async () => {
+    const mockToken = "valid-jwt-token";
+    const mockPayload = {
+      userId: "user-123",
+      email: "test@example.com",
+      expiresAt: new Date("2024-12-01T00:00:00Z"),
+    };
+
+    mockCookieStore.get.mockReturnValue({ value: mockToken });
+    mockJwtVerify.mockResolvedValue({ payload: mockPayload });
+
+    const result = await getSession();
+
+    expect(result).toEqual(mockPayload);
+    expect(mockCookieStore.get).toHaveBeenCalledWith("auth-token");
+    expect(mockJwtVerify).toHaveBeenCalledWith(mockToken, expect.any(Object));
+  });
+
+  test("returns null when JWT verification fails", async () => {
+    const mockToken = "invalid-jwt-token";
+
+    mockCookieStore.get.mockReturnValue({ value: mockToken });
+    mockJwtVerify.mockRejectedValue(new Error("Invalid token"));
+
+    const result = await getSession();
+
+    expect(result).toBeNull();
+    expect(mockCookieStore.get).toHaveBeenCalledWith("auth-token");
+    expect(mockJwtVerify).toHaveBeenCalledWith(mockToken, expect.any(Object));
+  });
+
+  test("returns null when JWT verification throws different error types", async () => {
+    const mockToken = "malformed-token";
+
+    mockCookieStore.get.mockReturnValue({ value: mockToken });
+
+    // Test with different error types
+    const errors = [
+      new Error("Token expired"),
+      new TypeError("Invalid signature"),
+      "String error",
+      null,
+      undefined
+    ];
+
+    for (const error of errors) {
+      vi.clearAllMocks();
+      mockCookieStore.get.mockReturnValue({ value: mockToken });
+      mockJwtVerify.mockRejectedValue(error);
+
+      const result = await getSession();
+
+      expect(result).toBeNull();
+      expect(mockJwtVerify).toHaveBeenCalledWith(mockToken, expect.any(Object));
+    }
+  });
+
+  test("handles empty token string", async () => {
+    mockCookieStore.get.mockReturnValue({ value: "" });
+
+    const result = await getSession();
+
+    expect(result).toBeNull();
+    expect(mockJwtVerify).not.toHaveBeenCalled();
+  });
+
+  test("handles whitespace-only token", async () => {
+    const mockToken = "   ";
+    mockCookieStore.get.mockReturnValue({ value: mockToken });
+    mockJwtVerify.mockRejectedValue(new Error("Invalid token"));
+
+    const result = await getSession();
+
+    expect(result).toBeNull();
+    expect(mockJwtVerify).toHaveBeenCalledWith(mockToken, expect.any(Object));
+  });
+
+  test("preserves all payload properties from valid JWT", async () => {
+    const mockToken = "complete-jwt-token";
+    const completePayload = {
+      userId: "user-456",
+      email: "complete@test.com",
+      expiresAt: new Date("2024-12-31T23:59:59Z"),
+      iat: 1234567890,
+      exp: 9876543210,
+      customField: "custom-value"
+    };
+
+    mockCookieStore.get.mockReturnValue({ value: mockToken });
+    mockJwtVerify.mockResolvedValue({ payload: completePayload });
+
+    const result = await getSession();
+
+    expect(result).toEqual(completePayload);
+    expect(result).toHaveProperty("userId", "user-456");
+    expect(result).toHaveProperty("email", "complete@test.com");
+    expect(result).toHaveProperty("expiresAt");
+    expect(result).toHaveProperty("iat", 1234567890);
+    expect(result).toHaveProperty("exp", 9876543210);
+    expect(result).toHaveProperty("customField", "custom-value");
+  });
+
+  test("handles malformed payload from JWT", async () => {
+    const mockToken = "jwt-with-weird-payload";
+
+    mockCookieStore.get.mockReturnValue({ value: mockToken });
+    mockJwtVerify.mockResolvedValue({ payload: null });
+
+    const result = await getSession();
+
+    expect(result).toBeNull();
+  });
+
+  test("calls cookies function correctly", async () => {
+    mockCookieStore.get.mockReturnValue(undefined);
+
+    await getSession();
+
+    const { cookies } = await import("next/headers");
+    expect(cookies).toHaveBeenCalled();
   });
 });
