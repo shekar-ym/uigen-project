@@ -1,4 +1,5 @@
 // Test file for Claude automatic PR review
+// Updated to test AWS Bedrock configuration - no more credit requirements!
 function calculateTotal(items) {
   let total = 0;
   for (let i = 0; i < items.length; i++) {
