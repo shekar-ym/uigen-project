@@ -1,0 +1,65 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Build project
+        run: npm run build
+
+      - name: Install Claude CLI
+        run: |
+          curl -fsSL https://claude.ai/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Run Claude Code Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "⚠️ ANTHROPIC_API_KEY not found. Skipping Claude review."
+            echo "To enable Claude Code review, add ANTHROPIC_API_KEY to repository secrets."
+            exit 0
+          fi
+
+          # Get the diff for this PR
+          git diff origin/${{ github.base_ref }}...HEAD > pr-diff.patch
+
+          if [ ! -s pr-diff.patch ]; then
+            echo "No changes detected in this PR"
+            exit 0
+          fi
+
+          echo "🤖 Running Claude Code review on PR changes..."
+
+          # Use Claude CLI to review the changes
+          claude review pr-diff.patch --format github-actions
